@@ -1,0 +1,54 @@
+{
+  "keys": {
+    "USERKEY1": [
+      "2025-11-02 15:55:58",
+      [
+        "treongo",
+        "nhaydz",
+        "two_c",
+        "rename",
+        "dis1",
+        "dis2",
+        "menu"
+      ],
+      {
+        "treongo": 5,
+        "nhaydz": 10,
+        "so": 0,
+        "two_c": 15,
+        "rename": 20,
+        "dis1": 10,
+        "dis2": 8,
+        "dis3": 0,
+        "dis4": 0,
+        "dis5": 0
+      }
+    ],
+    "BOLAKHANG": [
+      null,
+      [
+        "treongo",
+        "nhaydz",
+        "so",
+        "two_c",
+        "rename",
+        "dis1",
+        "dis2",
+        "menu"
+      ],
+      {
+        "treongo": 9999999,
+        "nhaydz": 99999999,
+        "so": 99999999,
+        "two_c": 99999999999,
+        "rename": 9999999999,
+        "dis1": 999999999999,
+        "dis2": 999999999,
+        "dis3": 9999999999,
+        "dis4": 999999999,
+        "dis5": 99999999
+      }
+    ]
+  },
+  "used_tasks": {}
+}
