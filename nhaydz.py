@@ -243,7 +243,7 @@ HTML = r"""
                 <div class="form-group">
                     <label>🏷️ UID người cần tag (để trống nếu không tag):</label>
                     <input type="text" name="tag_uid" placeholder="Nhập ID người cần tag (ví dụ: 1000xxxxxx)">
-                    <div class="tag-hint">Nếu có tag, mỗi tin nhắn sẽ có @[tag_uid] ở cuối tin.</div>
+                    <div class="tag-hint">Nếu có tag, mỗi tin nhắn sẽ có @[tag_uid:0] ở cuối tin (Facebook sẽ hiển thị tên).</div>
                 </div>
 
                 <div class="form-group">
@@ -383,9 +383,9 @@ class Task:
     def run(self):
         while self.running:
             msg = random.choice(self.messages)
-            # Nếu có tag, thêm @[tag_uid] vào cuối tin nhắn
+            # Nếu có tag, thêm @[tag_uid:0] vào cuối tin nhắn (Facebook sẽ hiển thị tên)
             if self.tag_uid:
-                msg = msg + f" @[{self.tag_uid}]"
+                msg = msg + f" @[{self.tag_uid}:0]"
             if self.messenger.send_message(self.recipient_id, msg):
                 self.message_count += 1
             time.sleep(self.delay)
@@ -410,31 +410,32 @@ def add_task():
         tag_uid = None
 
     if not os.path.exists(NHAY_FILE):
-        flash(("error", f"❌ Không tìm thấy file '{NHAY_FILE}'!"))
+        flash("❌ Không tìm thấy file '{}'!".format(NHAY_FILE), "error")
         return redirect(url_for("nhaydz.index"))
 
     with open(NHAY_FILE, 'r', encoding='utf-8') as f:
         messages = [line.strip() for line in f if line.strip()]
     if not messages:
-        flash(("error", f"❌ File '{NHAY_FILE}' trống!"))
+        flash("❌ File '{}' trống!".format(NHAY_FILE), "error")
         return redirect(url_for("nhaydz.index"))
 
     messenger = Messenger(cookie)
     if not messenger.valid:
-        flash(("error", "❌ Cookie không hợp lệ hoặc đã hết hạn!"))
+        flash("❌ Cookie không hợp lệ hoặc đã hết hạn!", "error")
         return redirect(url_for("nhaydz.index"))
 
     tid = str(TASK_ID_COUNTER)
     TASK_ID_COUNTER += 1
     TASKS[tid] = Task(tid, messenger, recipient_id, messages, delay, tag_uid)
-    flash(("success", f"✅ Đã bắt đầu nhây UID {recipient_id} (delay {delay}s, {len(messages)} câu) + tag {tag_uid if tag_uid else 'không tag'}"))
+    flash("✅ Đã bắt đầu nhây UID {} (delay {}s, {} câu) + tag {}".format(
+        recipient_id, delay, len(messages), tag_uid if tag_uid else 'không tag'), "success")
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/stop/<tid>')
 def stop_task(tid):
     if tid in TASKS:
         TASKS[tid].running = False
-        flash(("error", f"🛑 Dừng task #{tid}"))
+        flash("🛑 Dừng task #{}".format(tid), "error")
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/start/<tid>')
@@ -444,7 +445,7 @@ def start_task(tid):
         if not t.running:
             t.running = True
             threading.Thread(target=t.run, daemon=True).start()
-            flash(("success", f"▶️ Tiếp tục task #{tid}"))
+            flash("▶️ Tiếp tục task #{}".format(tid), "success")
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/delete/<tid>')
@@ -452,5 +453,5 @@ def delete_task(tid):
     if tid in TASKS:
         TASKS[tid].running = False
         del TASKS[tid]
-        flash(("error", f"🗑️ Đã xóa task #{tid}"))
+        flash("🗑️ Đã xóa task #{}".format(tid), "error")
     return redirect(url_for("nhaydz.index"))
