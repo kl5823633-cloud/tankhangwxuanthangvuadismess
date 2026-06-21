@@ -3,14 +3,12 @@ import threading, time, requests, re, random, os, json
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# ======== BLUEPRINT ========
 nhaydz_bp = Blueprint("nhaydz", __name__, url_prefix="/nhaydz")
 
 TASKS = {}
 TASK_ID_COUNTER = 1
 NHAY_FILE = "nhay.txt"
 
-# ------------------- USER AGENTS -------------------
 USER_AGENTS = [
     "Mozilla/5.0 (Linux; Android 11; RMX2185) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.140 Mobile Safari/537.36",
     "Mozilla/5.0 (Linux; Android 12; Redmi Note 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.129 Mobile Safari/537.36",
@@ -28,12 +26,7 @@ def get_session_with_retries():
     session.mount('http://', HTTPAdapter(max_retries=retries))
     return session
 
-# ====================== HÀM LẤY TÊN (CỐ GẮNG, NHƯNG KHÔNG BẮT BUỘC) ======================
 def get_name_from_uid(uid, cookie, fb_dtsg=None):
-    """
-    Cố gắng lấy tên, nếu không được thì trả về None.
-    Không ném exception, luôn trả về None khi thất bại.
-    """
     session = get_session_with_retries()
     user_agent = random.choice(USER_AGENTS)
     headers = {
@@ -44,7 +37,6 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
     }
     session.headers.update(headers)
 
-    # Thử API nếu có fb_dtsg
     if fb_dtsg:
         try:
             form = {
@@ -73,7 +65,6 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
         except:
             pass
 
-    # Thử HTML
     urls = [
         f"https://mbasic.facebook.com/profile.php?id={uid}&v=info",
         f"https://mbasic.facebook.com/profile.php?id={uid}",
@@ -102,7 +93,6 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
             continue
     return None
 
-# ====================== LỚP MESSENGER (GIỮ NGUYÊN) ======================
 class Messenger:
     def __init__(self, cookie):
         self.cookie = cookie
@@ -172,18 +162,17 @@ class Messenger:
                 '__rev': '1015919737',
                 'fb_dtsg': self.fb_dtsg
             }
-            # Nếu có id_tag thì thêm tag, không cần name_tag chính xác
+            # Nếu có id_tag thì luôn thêm payload tag, dù name_tag có None
             if id_tag:
-                # Tìm vị trí của @ trong message
-                if name_tag:
-                    name_clean = name_tag[1:] if name_tag.startswith('@') else name_tag
-                else:
-                    name_clean = "người dùng"  # fallback
+                if not name_tag:
+                    name_tag = "người dùng"
+                # Tìm vị trí của tên trong message (có thể đã có @)
+                name_clean = name_tag[1:] if name_tag.startswith('@') else name_tag
                 lower_msg = message.lower()
                 lower_name = name_clean.lower()
                 pos = lower_msg.find(lower_name)
                 if pos == -1:
-                    # Nếu không tìm thấy, gắn cuối tin nhắn
+                    # Nếu không tìm thấy, đặt ở cuối message
                     pos = len(message)
                 data.update({
                     'profile_xmd[0][offset]': str(pos),
@@ -222,7 +211,6 @@ class Messenger:
                     time.sleep(2 * (attempt+1))
         return {'success': False, 'error_description': 'Gửi thất bại'}
 
-# ====================== TASK ======================
 class Task:
     def __init__(self, tid, messenger, recipient_id, messages, delay, tag_uid=None, tag_name=None):
         self.tid = tid
@@ -240,16 +228,14 @@ class Task:
         while self.running:
             msg = random.choice(self.messages)
             if self.tag_uid:
-                # Tạo tin nhắn có tag @tên (nếu có tên) hoặc @UID
-                if self.tag_name:
-                    full_msg = msg + f" @{self.tag_name}"
-                else:
-                    full_msg = msg + f" @UID_{self.tag_uid}"
+                # Nếu có tên thì dùng, không thì đặt là "người dùng"
+                name_display = self.tag_name if self.tag_name else "người dùng"
+                full_msg = msg + f" @{name_display}"
                 result = self.messenger.gui_tn(
                     self.recipient_id,
                     full_msg,
                     id_tag=self.tag_uid,
-                    name_tag=self.tag_name if self.tag_name else "người dùng"
+                    name_tag=name_display
                 )
             else:
                 result = self.messenger.gui_tn(self.recipient_id, msg)
@@ -265,7 +251,6 @@ class Task:
     def user_id(self):
         return self.messenger.user_id
 
-# ====================== HTML ======================
 HTML = r"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -337,7 +322,6 @@ td { background: rgba(13, 17, 23, 0.7); }
 </html>
 """
 
-# ====================== ROUTES ======================
 @nhaydz_bp.route('/')
 def index():
     return render_template_string(HTML, tasks=TASKS)
@@ -375,9 +359,8 @@ def add_task():
                 tag_name = name
                 flash(f"✅ Đã tìm thấy tên: {tag_name}", "success")
             else:
-                # Vẫn giữ tag_uid, chỉ thông báo không lấy được tên
                 flash(f"⚠️ Không lấy được tên cho UID {tag_uid}, nhưng vẫn tag bằng UID.", "info")
-                tag_name = None  # vẫn dùng UID để tag
+                tag_name = None
         except Exception as e:
             flash(f"⚠️ Lỗi lấy tên: {e}, vẫn tag bằng UID.", "info")
             tag_name = None
