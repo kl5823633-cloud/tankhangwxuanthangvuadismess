@@ -28,21 +28,25 @@ def get_session_with_retries():
     session.mount('http://', HTTPAdapter(max_retries=retries))
     return session
 
-# ====================== LẤY TÊN TỪ UID (CỰC KỲ MẠNH) ======================
+# ====================== LẤY TÊN TỪ UID (CỰC KỲ MẠNH VÀ ĐƠN GIẢN) ======================
 def get_name_from_uid(uid, cookie):
     """
     Trả về tên hiển thị của UID, hoặc None nếu không lấy được.
-    Dùng session để giữ cookie và thử nhiều domain.
+    Sử dụng session riêng, thử nhiều endpoint, bắt lỗi đầy đủ.
     """
     session = get_session_with_retries()
-    session.headers.update({
-        'User-Agent': random.choice(USER_AGENTS),
+    user_agent = random.choice(USER_AGENTS)
+    headers = {
+        'User-Agent': user_agent,
         'Cookie': cookie,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
         'Connection': 'keep-alive',
-    })
-    # Danh sách URL thử
+        'Cache-Control': 'no-cache',
+    }
+    session.headers.update(headers)
+
+    # Các dạng URL có thể lấy tên
     urls = [
         f"https://mbasic.facebook.com/profile.php?id={uid}",
         f"https://www.facebook.com/profile.php?id={uid}",
@@ -56,32 +60,33 @@ def get_name_from_uid(uid, cookie):
             if resp.status_code != 200:
                 continue
             text = resp.text
-            # Lấy title
+            # Kiểm tra nếu là trang đăng nhập hoặc lỗi
+            if "login" in text.lower() or "Không tìm thấy" in text:
+                continue
+            # Cách 1: Thẻ title
             match = re.search(r'<title>(.*?)</title>', text)
             if match:
-                title = match.group(1)
-                title = re.sub(r' \| Facebook$', '', title).strip()
-                # Loại bỏ các title rác
-                if title and "Facebook" not in title and "login" not in title.lower() and "Không tìm thấy" not in title:
+                title = match.group(1).strip()
+                title = re.sub(r' \| Facebook$', '', title)
+                if title and "Facebook" not in title and "login" not in title.lower():
                     return title
-            # Nếu không có title, thử tìm trong thẻ h1 hoặc span
-            name_match = re.search(r'<h1[^>]*>([^<]+)</h1>', text)
-            if name_match:
-                name = name_match.group(1).strip()
-                if name and len(name) > 2:
+            # Cách 2: Thẻ h1
+            match = re.search(r'<h1[^>]*>([^<]+)</h1>', text)
+            if match:
+                name = match.group(1).strip()
+                if name and len(name) > 1:
                     return name
-            # Tìm trong meta og:title
-            meta_match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', text)
-            if meta_match:
-                return meta_match.group(1).strip()
+            # Cách 3: Meta og:title
+            match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', text)
+            if match:
+                return match.group(1).strip()
         except Exception as e:
             print(f"[!] Lỗi khi lấy tên từ {url}: {e}")
             continue
     return None
 
-# ====================== LỚP MESSENGER (GIỮ NGUYÊN NHƯ BẢN TRƯỚC) ======================
+# ====================== LỚP MESSENGER (GIỮ NGUYÊN TỐT NHẤT) ======================
 class Messenger:
-    # (Toàn bộ class Messenger đã được cập nhật ở lần trước, tôi giữ nguyên, không thay đổi)
     def __init__(self, cookie):
         self.cookie = cookie
         self.user_id = self.extract_user_id()
@@ -321,7 +326,7 @@ class Task:
     def user_id(self):
         return self.messenger.user_id
 
-# ====================== HTML (GIỮ NGUYÊN) ======================
+# ====================== HTML (GIỮ NGUYÊN, KHÔNG THAY ĐỔI) ======================
 HTML = r"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -642,21 +647,21 @@ def add_task():
         flash(f"❌ Lỗi đăng nhập: {str(e)}", "error")
         return redirect(url_for("nhaydz.index"))
 
-    # Xử lý tag
+    # Xử lý tag - KHÔNG FLASH "Đã tìm thấy tên" nếu lỗi
     tag_name = None
     if tag_uid:
         try:
             tag_name = get_name_from_uid(tag_uid, cookie)
             if tag_name:
-                flash(f"✅ Đã tìm thấy tên: {tag_name}", "success")
+                flash(f"✅ Tag: đã tìm thấy tên '{tag_name}' cho UID {tag_uid}", "success")
             else:
-                flash(f"⚠️ Không lấy được tên cho UID {tag_uid}. Bỏ qua tag.", "error")
+                flash(f"⚠️ Không lấy được tên cho UID {tag_uid} (có thể UID không tồn tại hoặc bị ẩn). Bỏ qua tag.", "error")
                 tag_uid = None
         except Exception as e:
             flash(f"⚠️ Lỗi khi lấy tên: {str(e)}. Bỏ qua tag.", "error")
             tag_uid = None
     else:
-        flash("ℹ️ Không tag, chỉ gửi tin nhắn bình thường.", "success")
+        flash("ℹ️ Không tag, chỉ gửi tin nhắn bình thường.", "info")
 
     tid = str(TASK_ID_COUNTER)
     TASK_ID_COUNTER += 1
