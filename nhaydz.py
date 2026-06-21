@@ -3,12 +3,14 @@ import threading, time, requests, re, random, os, json
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# ======== BLUEPRINT ========
 nhaydz_bp = Blueprint("nhaydz", __name__, url_prefix="/nhaydz")
 
 TASKS = {}
 TASK_ID_COUNTER = 1
 NHAY_FILE = "nhay.txt"
 
+# ------------------- USER AGENTS -------------------
 USER_AGENTS = [
     "Mozilla/5.0 (Linux; Android 11; RMX2185) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.140 Mobile Safari/537.36",
     "Mozilla/5.0 (Linux; Android 12; Redmi Note 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.129 Mobile Safari/537.36",
@@ -26,6 +28,7 @@ def get_session_with_retries():
     session.mount('http://', HTTPAdapter(max_retries=retries))
     return session
 
+# ====================== LẤY TÊN (CÓ FALLBACK, KHÔNG BẮT BUỘC) ======================
 def get_name_from_uid(uid, cookie, fb_dtsg=None):
     session = get_session_with_retries()
     user_agent = random.choice(USER_AGENTS)
@@ -37,6 +40,7 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
     }
     session.headers.update(headers)
 
+    # Phương thức 1: API chat/user_info
     if fb_dtsg:
         try:
             form = {
@@ -65,6 +69,7 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
         except:
             pass
 
+    # Phương thức 2: HTML
     urls = [
         f"https://mbasic.facebook.com/profile.php?id={uid}&v=info",
         f"https://mbasic.facebook.com/profile.php?id={uid}",
@@ -89,10 +94,14 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
                 name = match.group(1).strip()
                 if name and len(name) > 1:
                     return name
+            match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', text)
+            if match:
+                return match.group(1).strip()
         except:
             continue
     return None
 
+# ====================== CLASS MESSENGER (NÂNG CẤP) ======================
 class Messenger:
     def __init__(self, cookie):
         self.cookie = cookie
@@ -100,6 +109,15 @@ class Messenger:
         self.user_agent = random.choice(USER_AGENTS)
         self.fb_dtsg = None
         self.name = ""
+        self.session = get_session_with_retries()
+        self.session.headers.update({
+            'User-Agent': self.user_agent,
+            'Cookie': self.cookie,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.facebook.com/',
+        })
         self.init_params()
 
     def extract_user_id(self):
@@ -108,37 +126,110 @@ class Messenger:
             raise Exception("Cookie không có c_user")
         return match.group(1)
 
-    def init_params(self):
-        headers = {'Cookie': self.cookie, 'User-Agent': self.user_agent}
+    def _get_dtsg_from_html(self, text):
+        patterns = [
+            r'name="fb_dtsg"\s+value="([^"]+)"',
+            r'"fb_dtsg":"([^"]+)"',
+            r'fb_dtsg\s*=\s*"([^"]+)"',
+            r'FB_DTSG\s*=\s*"([^"]+)"',
+            r'"token":"([^"]+)"',
+        ]
+        for pat in patterns:
+            m = re.search(pat, text)
+            if m:
+                return m.group(1)
+        scripts = re.findall(r'<script[^>]*>([\s\S]*?)</script>', text)
+        for script in scripts:
+            if 'fb_dtsg' in script:
+                m = re.search(r'fb_dtsg\s*[:=]\s*"([^"]+)"', script)
+                if m:
+                    return m.group(1)
+        return None
+
+    def _get_dtsg_from_ajax(self):
         try:
-            resp = requests.get('https://mbasic.facebook.com/me', headers=headers, timeout=10)
-            name_match = re.search(r'<title>(.*?)</title>', resp.text)
-            if name_match:
-                self.name = name_match.group(1).replace(" | Facebook", "").strip()
-            fb_dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', resp.text)
-            if fb_dtsg_match:
-                self.fb_dtsg = fb_dtsg_match.group(1)
-            else:
-                raise Exception("Không lấy được fb_dtsg")
+            url = "https://www.facebook.com/ajax/bootloader-endpoint/"
+            headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Referer': 'https://www.facebook.com/',
+            }
+            resp = self.session.post(url, data={}, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if 'token' in data:
+                    return data['token']
+                if 'fb_dtsg' in data:
+                    return data['fb_dtsg']
         except:
+            pass
+        return None
+
+    def init_params(self):
+        urls = [
+            'https://mbasic.facebook.com/me',
+            'https://www.facebook.com/',
+            'https://m.facebook.com/me',
+            'https://mbasic.facebook.com/messages/',
+            'https://www.facebook.com/messages/',
+        ]
+        for url in urls:
             try:
-                resp2 = requests.get('https://www.facebook.com/', headers=headers, timeout=10)
-                fb_dtsg_match2 = re.search(r'name="fb_dtsg" value="(.*?)"', resp2.text)
-                if fb_dtsg_match2:
-                    self.fb_dtsg = fb_dtsg_match2.group(1)
-                    prof = requests.get('https://www.facebook.com/me', headers=headers, timeout=10)
-                    name_match2 = re.search(r'<title>(.*?)</title>', prof.text)
-                    if name_match2:
-                        self.name = name_match2.group(1).replace(" | Facebook", "").strip()
-                else:
-                    raise Exception("Không thể lấy fb_dtsg")
-            except Exception as e:
-                raise Exception(f"Lỗi init: {e}")
+                for attempt in range(2):
+                    if attempt > 0:
+                        self.session.headers['User-Agent'] = random.choice(USER_AGENTS)
+                    resp = self.session.get(url, timeout=12, allow_redirects=True)
+                    if resp.status_code != 200:
+                        continue
+                    dtsg = self._get_dtsg_from_html(resp.text)
+                    if dtsg:
+                        self.fb_dtsg = dtsg
+                        name_match = re.search(r'<title>(.*?)</title>', resp.text)
+                        if name_match:
+                            self.name = name_match.group(1).replace(" | Facebook", "").strip()
+                        print(f"[+] Lấy fb_dtsg thành công từ {url}")
+                        return
+            except:
+                continue
+
+        dtsg_ajax = self._get_dtsg_from_ajax()
+        if dtsg_ajax:
+            self.fb_dtsg = dtsg_ajax
+            try:
+                prof = self.session.get('https://mbasic.facebook.com/me', timeout=10)
+                if prof.status_code == 200:
+                    nm = re.search(r'<title>(.*?)</title>', prof.text)
+                    if nm:
+                        self.name = nm.group(1).replace(" | Facebook", "").strip()
+            except:
+                pass
+            print("[+] Lấy fb_dtsg từ Ajax thành công")
+            return
+
+        dtsg_in_cookie = re.search(r'fb_dtsg=([^;]+)', self.cookie)
+        if dtsg_in_cookie:
+            self.fb_dtsg = dtsg_in_cookie.group(1)
+            print("[+] Lấy fb_dtsg từ cookie thành công")
+            return
+
+        raise Exception(
+            "Không thể lấy fb_dtsg từ mọi nguồn. Cookie có thể hết hạn hoặc thiếu 'xs'/'datr'. "
+            "Hãy đăng nhập Facebook và lấy cookie mới (có c_user, xs, datr)."
+        )
 
     def refresh_fb_dtsg(self):
         try:
+            self.session = get_session_with_retries()
+            self.session.headers.update({
+                'User-Agent': random.choice(USER_AGENTS),
+                'Cookie': self.cookie,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
+                'Connection': 'keep-alive',
+                'Referer': 'https://www.facebook.com/',
+            })
             self.init_params()
-            print(f"[!] Refresh fb_dtsg cho {self.name}")
+            print(f"[!] Refresh fb_dtsg thành công cho {self.name} ({self.user_id})")
         except Exception as e:
             print(f"[!] Refresh thất bại: {e}")
 
@@ -162,17 +253,15 @@ class Messenger:
                 '__rev': '1015919737',
                 'fb_dtsg': self.fb_dtsg
             }
-            # Nếu có id_tag thì luôn thêm payload tag, dù name_tag có None
             if id_tag:
-                if not name_tag:
-                    name_tag = "người dùng"
-                # Tìm vị trí của tên trong message (có thể đã có @)
-                name_clean = name_tag[1:] if name_tag.startswith('@') else name_tag
+                if name_tag:
+                    name_clean = name_tag[1:] if name_tag.startswith('@') else name_tag
+                else:
+                    name_clean = "người dùng"
                 lower_msg = message.lower()
                 lower_name = name_clean.lower()
                 pos = lower_msg.find(lower_name)
                 if pos == -1:
-                    # Nếu không tìm thấy, đặt ở cuối message
                     pos = len(message)
                 data.update({
                     'profile_xmd[0][offset]': str(pos),
@@ -209,8 +298,9 @@ class Messenger:
                 print(f"[!] Lỗi gửi lần {attempt+1}: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(2 * (attempt+1))
-        return {'success': False, 'error_description': 'Gửi thất bại'}
+        return {'success': False, 'error_description': 'Gửi thất bại sau nhiều lần thử'}
 
+# ====================== TASK ======================
 class Task:
     def __init__(self, tid, messenger, recipient_id, messages, delay, tag_uid=None, tag_name=None):
         self.tid = tid
@@ -228,14 +318,15 @@ class Task:
         while self.running:
             msg = random.choice(self.messages)
             if self.tag_uid:
-                # Nếu có tên thì dùng, không thì đặt là "người dùng"
-                name_display = self.tag_name if self.tag_name else "người dùng"
-                full_msg = msg + f" @{name_display}"
+                if self.tag_name:
+                    full_msg = msg + f" @{self.tag_name}"
+                else:
+                    full_msg = msg + f" @UID_{self.tag_uid}"
                 result = self.messenger.gui_tn(
                     self.recipient_id,
                     full_msg,
                     id_tag=self.tag_uid,
-                    name_tag=name_display
+                    name_tag=self.tag_name if self.tag_name else "người dùng"
                 )
             else:
                 result = self.messenger.gui_tn(self.recipient_id, msg)
@@ -251,6 +342,7 @@ class Task:
     def user_id(self):
         return self.messenger.user_id
 
+# ====================== HTML ======================
 HTML = r"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -322,6 +414,7 @@ td { background: rgba(13, 17, 23, 0.7); }
 </html>
 """
 
+# ====================== ROUTES ======================
 @nhaydz_bp.route('/')
 def index():
     return render_template_string(HTML, tasks=TASKS)
@@ -337,7 +430,7 @@ def add_task():
         tag_uid = None
 
     if not os.path.exists(NHAY_FILE):
-        flash(f"❌ Không tìm thấy '{NHAY_FILE}'!", "error")
+        flash(f"❌ Không tìm thấy file '{NHAY_FILE}'!", "error")
         return redirect(url_for("nhaydz.index"))
     with open(NHAY_FILE, 'r', encoding='utf-8') as f:
         messages = [line.strip() for line in f if line.strip()]
@@ -396,5 +489,5 @@ def delete_task(tid):
     if tid in TASKS:
         TASKS[tid].running = False
         del TASKS[tid]
-        flash(f"🗑️ Xóa task #{tid}", "error")
+        flash(f"🗑️ Đã xóa task #{tid}", "error")
     return redirect(url_for("nhaydz.index"))
