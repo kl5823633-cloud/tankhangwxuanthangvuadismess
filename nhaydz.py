@@ -10,15 +10,13 @@ TASKS = {}
 TASK_ID_COUNTER = 1
 NHAY_FILE = "nhay.txt"
 
-# ------------------- USER AGENTS -------------------
+# ------------------- USER AGENTS (ƯU TIÊN DESKTOP MỚI) -------------------
 USER_AGENTS = [
-    "Mozilla/5.0 (Linux; Android 11; RMX2185) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.140 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 12; Redmi Note 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.129 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 13; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.68 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 10; V2031) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.5938.60 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 14; CPH2481) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.86 Mobile Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 ]
 
 def get_session_with_retries():
@@ -28,11 +26,10 @@ def get_session_with_retries():
     session.mount('http://', HTTPAdapter(max_retries=retries))
     return session
 
-# ====================== LẤY TÊN - KHÔNG BAO GIỜ TRẢ VỀ "Lỗi" ======================
+# ====================== LẤY TÊN - LOẠI BỎ RÁC ======================
 def get_name_from_uid(uid, cookie, fb_dtsg=None):
     """
-    Trả về tên hiển thị của UID, hoặc None nếu không thể lấy.
-    Tuyệt đối không trả về chuỗi "Lỗi" hay "Không tìm thấy".
+    Trả về tên thật của UID, hoặc None nếu không lấy được hoặc tên là rác.
     """
     session = get_session_with_retries()
     user_agent = random.choice(USER_AGENTS)
@@ -41,10 +38,13 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
         'User-Agent': user_agent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
     }
     session.headers.update(headers)
 
-    # Phương thức 1: API chat/user_info
+    # Phương thức 1: API (tốt nhất, ít bị chặn)
     if fb_dtsg:
         try:
             form = {
@@ -68,12 +68,20 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
                 profile = data.get("payload", {}).get("profiles", {}).get(uid)
                 if profile:
                     name = profile.get("name")
-                    if name and isinstance(name, str) and "Lỗi" not in name and "Không tìm thấy" not in name:
-                        return name
+                    if name and isinstance(name, str):
+                        # Loại bỏ tên rác
+                        lower_name = name.lower()
+                        if ("trình duyệt" not in lower_name and 
+                            "hỗ trợ" not in lower_name and 
+                            "facebook" not in lower_name and
+                            "lỗi" not in lower_name and
+                            "không tìm thấy" not in lower_name and
+                            len(name) > 2):
+                            return name
         except Exception as e:
             print(f"[!] API error: {e}")
 
-    # Phương thức 2: HTML
+    # Phương thức 2: HTML (fallback)
     urls = [
         f"https://mbasic.facebook.com/profile.php?id={uid}&v=info",
         f"https://mbasic.facebook.com/profile.php?id={uid}",
@@ -85,24 +93,43 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
             if resp.status_code != 200:
                 continue
             text = resp.text
+            # Nếu trang chứa "trình duyệt không hỗ trợ" thì bỏ qua
+            if "trình duyệt" in text.lower() and "không hỗ trợ" in text.lower():
+                continue
             if "login" in text.lower() or "Không tìm thấy" in text:
                 continue
+            # Lấy title
             match = re.search(r'<title>(.*?)</title>', text)
             if match:
                 title = match.group(1).strip()
                 title = re.sub(r' \| Facebook$', '', title)
                 if title and "Facebook" not in title and "login" not in title.lower():
-                    if "Lỗi" not in title and "Không tìm thấy" not in title:
+                    lower_title = title.lower()
+                    if ("trình duyệt" not in lower_title and 
+                        "hỗ trợ" not in lower_title and
+                        "lỗi" not in lower_title and
+                        "không tìm thấy" not in lower_title):
                         return title
+            # Lấy h1
             match = re.search(r'<h1[^>]*>([^<]+)</h1>', text)
             if match:
                 name = match.group(1).strip()
-                if name and len(name) > 1 and "Lỗi" not in name and "Không tìm thấy" not in name:
-                    return name
+                if name and len(name) > 1:
+                    lower_name = name.lower()
+                    if ("trình duyệt" not in lower_name and 
+                        "hỗ trợ" not in lower_name and
+                        "lỗi" not in lower_name and
+                        "không tìm thấy" not in lower_name):
+                        return name
+            # Meta og:title
             match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', text)
             if match:
                 name = match.group(1).strip()
-                if "Lỗi" not in name and "Không tìm thấy" not in name:
+                lower_name = name.lower()
+                if ("trình duyệt" not in lower_name and 
+                    "hỗ trợ" not in lower_name and
+                    "lỗi" not in lower_name and
+                    "không tìm thấy" not in lower_name):
                     return name
         except Exception as e:
             print(f"[!] HTML error: {e}")
@@ -123,8 +150,10 @@ class Messenger:
             'Cookie': self.cookie,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Referer': 'https://www.facebook.com/',
+            'Upgrade-Insecure-Requests': '1',
         })
         self.init_params()
 
@@ -460,7 +489,7 @@ def add_task():
                 tag_name = name
                 flash(f"✅ Đã tìm thấy tên: {tag_name}", "success")
             else:
-                flash(f"⚠️ Không lấy được tên cho UID {tag_uid}, nhưng vẫn tag bằng UID.", "info")
+                flash(f"⚠️ Không lấy được tên cho UID {tag_uid} (có thể bị ẩn hoặc không tồn tại), nhưng vẫn tag bằng UID.", "info")
                 tag_name = None
         except Exception as e:
             flash(f"⚠️ Lỗi lấy tên: {e}, vẫn tag bằng UID.", "info")
