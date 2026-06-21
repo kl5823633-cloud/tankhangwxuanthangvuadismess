@@ -14,7 +14,7 @@ HTML = r"""
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Messenger - Auto Nhây</title>
+    <title>Messenger - Auto Nhây + Tag</title>
     <style>
         body { 
             font-family: 'Segoe UI', Arial; 
@@ -211,12 +211,17 @@ HTML = r"""
             color: #888;
             opacity: 0.7;
         }
+        .tag-hint {
+            color: #ff9900;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="overlay">
         <div class="card">
-            <h1>💬 Auto Nhây Messenger</h1>
+            <h1>💬 Auto Nhây + Tag Messenger</h1>
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for cat, msg in messages %}
@@ -236,6 +241,12 @@ HTML = r"""
                 </div>
 
                 <div class="form-group">
+                    <label>🏷️ UID người cần tag (để trống nếu không tag):</label>
+                    <input type="text" name="tag_uid" placeholder="Nhập ID người cần tag (ví dụ: 1000xxxxxx)">
+                    <div class="tag-hint">Nếu có tag, mỗi tin nhắn sẽ có @[tag_uid] ở cuối tin.</div>
+                </div>
+
+                <div class="form-group">
                     <label>⏱ Delay giữa mỗi tin (giây):</label>
                     <input type="number" name="delay" placeholder="VD: 3" min="0.1" step="0.1" required>
                 </div>
@@ -249,6 +260,7 @@ HTML = r"""
                 <th>ID</th>
                 <th>User</th>
                 <th>Box</th>
+                <th>Tag UID</th>
                 <th>Tin đã gửi</th>
                 <th>Delay (s)</th>
                 <th>Trạng thái</th>
@@ -259,6 +271,7 @@ HTML = r"""
                 <td>{{tid}}</td>
                 <td>{{t.user_id}}</td>
                 <td>{{t.recipient_id}}</td>
+                <td>{{t.tag_uid if t.tag_uid else '-'}}</td>
                 <td>{{t.message_count}}</td>
                 <td>{{t.delay}}</td>
                 <td>
@@ -356,12 +369,13 @@ class Messenger:
 
 # ====================== TASK ======================
 class Task:
-    def __init__(self, tid, messenger, recipient_id, messages, delay):
+    def __init__(self, tid, messenger, recipient_id, messages, delay, tag_uid=None):
         self.tid = tid
         self.messenger = messenger
         self.recipient_id = recipient_id
         self.messages = messages
         self.delay = delay
+        self.tag_uid = tag_uid  # UID cần tag (có thể None)
         self.running = True
         self.message_count = 0
         threading.Thread(target=self.run, daemon=True).start()
@@ -369,6 +383,9 @@ class Task:
     def run(self):
         while self.running:
             msg = random.choice(self.messages)
+            # Nếu có tag, thêm @[tag_uid] vào cuối tin nhắn
+            if self.tag_uid:
+                msg = msg + f" @[{self.tag_uid}]"
             if self.messenger.send_message(self.recipient_id, msg):
                 self.message_count += 1
             time.sleep(self.delay)
@@ -388,6 +405,9 @@ def add_task():
     cookie = request.form['cookie'].strip()
     recipient_id = request.form['recipient_id'].strip()
     delay = float(request.form['delay'])
+    tag_uid = request.form.get('tag_uid', '').strip()
+    if tag_uid == '':
+        tag_uid = None
 
     if not os.path.exists(NHAY_FILE):
         flash(("error", f"❌ Không tìm thấy file '{NHAY_FILE}'!"))
@@ -406,8 +426,8 @@ def add_task():
 
     tid = str(TASK_ID_COUNTER)
     TASK_ID_COUNTER += 1
-    TASKS[tid] = Task(tid, messenger, recipient_id, messages, delay)
-    flash(("success", f"✅ Đã bắt đầu nhây UID {recipient_id} (delay {delay}s, {len(messages)} câu)"))
+    TASKS[tid] = Task(tid, messenger, recipient_id, messages, delay, tag_uid)
+    flash(("success", f"✅ Đã bắt đầu nhây UID {recipient_id} (delay {delay}s, {len(messages)} câu) + tag {tag_uid if tag_uid else 'không tag'}"))
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/stop/<tid>')
