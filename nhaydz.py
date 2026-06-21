@@ -28,8 +28,12 @@ def get_session_with_retries():
     session.mount('http://', HTTPAdapter(max_retries=retries))
     return session
 
-# ====================== LẤY TÊN (CÓ FALLBACK, KHÔNG BẮT BUỘC) ======================
+# ====================== LẤY TÊN - KHÔNG BAO GIỜ TRẢ VỀ "Lỗi" ======================
 def get_name_from_uid(uid, cookie, fb_dtsg=None):
+    """
+    Trả về tên hiển thị của UID, hoặc None nếu không thể lấy.
+    Tuyệt đối không trả về chuỗi "Lỗi" hay "Không tìm thấy".
+    """
     session = get_session_with_retries()
     user_agent = random.choice(USER_AGENTS)
     headers = {
@@ -64,10 +68,10 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
                 profile = data.get("payload", {}).get("profiles", {}).get(uid)
                 if profile:
                     name = profile.get("name")
-                    if name:
+                    if name and isinstance(name, str) and "Lỗi" not in name and "Không tìm thấy" not in name:
                         return name
-        except:
-            pass
+        except Exception as e:
+            print(f"[!] API error: {e}")
 
     # Phương thức 2: HTML
     urls = [
@@ -88,20 +92,24 @@ def get_name_from_uid(uid, cookie, fb_dtsg=None):
                 title = match.group(1).strip()
                 title = re.sub(r' \| Facebook$', '', title)
                 if title and "Facebook" not in title and "login" not in title.lower():
-                    return title
+                    if "Lỗi" not in title and "Không tìm thấy" not in title:
+                        return title
             match = re.search(r'<h1[^>]*>([^<]+)</h1>', text)
             if match:
                 name = match.group(1).strip()
-                if name and len(name) > 1:
+                if name and len(name) > 1 and "Lỗi" not in name and "Không tìm thấy" not in name:
                     return name
             match = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', text)
             if match:
-                return match.group(1).strip()
-        except:
+                name = match.group(1).strip()
+                if "Lỗi" not in name and "Không tìm thấy" not in name:
+                    return name
+        except Exception as e:
+            print(f"[!] HTML error: {e}")
             continue
     return None
 
-# ====================== CLASS MESSENGER (NÂNG CẤP) ======================
+# ====================== CLASS MESSENGER (SIÊU CỨNG) ======================
 class Messenger:
     def __init__(self, cookie):
         self.cookie = cookie
@@ -214,7 +222,7 @@ class Messenger:
 
         raise Exception(
             "Không thể lấy fb_dtsg từ mọi nguồn. Cookie có thể hết hạn hoặc thiếu 'xs'/'datr'. "
-            "Hãy đăng nhập Facebook và lấy cookie mới (có c_user, xs, datr)."
+            "Hãy đăng nhập Facebook và lấy cookie mới."
         )
 
     def refresh_fb_dtsg(self):
