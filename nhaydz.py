@@ -25,8 +25,10 @@ UA_VIA = [
 ]
 USER_AGENTS = UA_KIWI + UA_VIA
 
-# ====================== HÀM LẤY TÊN ======================
+# ====================== HÀM LẤY TÊN (có fallback) ======================
 def get_name_from_uid(uid, cookie, fb_dtsg, req="1b", rev="1015919737"):
+    """Lấy tên người dùng từ UID, fallback sang mbasic nếu API lỗi"""
+    # Thử qua API chat/user_info trước
     try:
         form = {
             f"ids[0]": uid,
@@ -42,17 +44,35 @@ def get_name_from_uid(uid, cookie, fb_dtsg, req="1b", rev="1015919737"):
             'Referer': 'https://www.facebook.com/',
             'User-Agent': random.choice(USER_AGENTS)
         }
-        response = requests.post("https://www.facebook.com/chat/user_info/", headers=headers, data=form)
+        response = requests.post("https://www.facebook.com/chat/user_info/", headers=headers, data=form, timeout=10)
         text_response = response.text
         if text_response.startswith("for (;;);"):
             text_response = text_response[9:]
         data = json.loads(text_response)
-        profile = data["payload"]["profiles"][uid]
-        return profile.get("name", "Không tìm thấy tên")
+        if "payload" in data and "profiles" in data["payload"] and uid in data["payload"]["profiles"]:
+            profile = data["payload"]["profiles"][uid]
+            name = profile.get("name")
+            if name:
+                return name
     except Exception as e:
-        return f"Lỗi: {e}"
+        print(f"[!] Lỗi API chat/user_info: {e}")
 
-# ====================== LỚP MESSENGER MỚI ======================
+    # Fallback: lấy từ mbasic
+    try:
+        headers = {'Cookie': cookie, 'User-Agent': random.choice(USER_AGENTS)}
+        res = requests.get(f'https://mbasic.facebook.com/profile.php?id={uid}', headers=headers, timeout=10)
+        name_match = re.search(r'<title>(.*?)</title>', res.text)
+        if name_match:
+            name = name_match.group(1).replace(" | Facebook", "").strip()
+            if name:
+                return name
+    except Exception as e:
+        print(f"[!] Lỗi fallback mbasic: {e}")
+
+    # Nếu vẫn không có, trả về None để bỏ qua tag
+    return None
+
+# ====================== LỚP MESSENGER ======================
 class Messenger:
     def __init__(self, cookie):
         self.cookie = cookie
@@ -91,7 +111,7 @@ class Messenger:
             print(f"[X] Lỗi làm mới fb_dtsg: {e}")
 
     def gui_tn(self, recipient_id, message, id_tag=None, name_tag=None, max_retries=3):
-        """Gửi tin nhắn, hỗ trợ tag nếu cung cấp id_tag và name_tag"""
+        """Gửi tin nhắn, hỗ trợ tag qua profile_xmd"""
         for attempt in range(max_retries):
             timestamp = int(time.time() * 1000)
             offline_threading_id = str(timestamp)
@@ -115,14 +135,13 @@ class Messenger:
                 'fb_dtsg': self.fb_dtsg
             }
 
-            # Nếu có tag, thêm thông tin profile_xmd để tag chính xác
+            # Nếu có tag hợp lệ, thêm profile_xmd
             if id_tag and name_tag:
-                # Tìm vị trí của name_tag trong message (có thể có dấu @ ở đầu)
+                # Tìm vị trí của name_tag trong message
                 if name_tag.startswith('@'):
-                    name_tag_clean = name_tag[1:]  # bỏ @
+                    name_tag_clean = name_tag[1:]
                 else:
                     name_tag_clean = name_tag
-                # Tìm vị trí bắt đầu của name_tag_clean trong message (không phân biệt hoa thường)
                 lower_msg = message.lower()
                 lower_name = name_tag_clean.lower()
                 start_pos = lower_msg.find(lower_name)
@@ -133,10 +152,6 @@ class Messenger:
                         'profile_xmd[0][id]': str(id_tag),
                         'profile_xmd[0][type]': 'p'
                     })
-                else:
-                    # Nếu không tìm thấy, thử thêm @ vào cuối
-                    # Thay vì, ta có thể bỏ qua tag
-                    pass
 
             headers = {
                 'Cookie': self.cookie,
@@ -200,7 +215,7 @@ class Task:
         self.messages = messages
         self.delay = delay
         self.tag_uid = tag_uid
-        self.tag_name = tag_name  # tên thật của người được tag
+        self.tag_name = tag_name  # tên thật của người được tag (hoặc None)
         self.running = True
         self.message_count = 0
         threading.Thread(target=self.run, daemon=True).start()
@@ -208,12 +223,9 @@ class Task:
     def run(self):
         while self.running:
             msg = random.choice(self.messages)
-            # Nếu có tag, ta sẽ thêm tên vào cuối tin nhắn (hoặc ở vị trí nào đó)
-            # và sử dụng profile_xmd để tag đúng
             if self.tag_uid and self.tag_name:
-                # Tạo tin nhắn có chứa tên tag
+                # Thêm tên vào cuối tin nhắn (có dấu @)
                 full_msg = msg + f" @{self.tag_name}"
-                # Gửi với tham số tag
                 result = self.messenger.gui_tn(
                     self.recipient_id,
                     full_msg,
@@ -234,7 +246,7 @@ class Task:
     def user_id(self):
         return self.messenger.user_id
 
-# ====================== HTML (giữ nguyên như cũ) ======================
+# ====================== HTML (giữ nguyên) ======================
 HTML = r"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -559,17 +571,17 @@ def add_task():
         flash("❌ Cookie không hợp lệ hoặc lỗi đăng nhập: {}".format(str(e)), "error")
         return redirect(url_for("nhaydz.index"))
 
-    # Nếu có tag, lấy tên người đó
+    # Nếu có tag, lấy tên người đó (fallback nếu lỗi)
     tag_name = None
     if tag_uid:
         try:
             tag_name = get_name_from_uid(tag_uid, cookie, messenger.fb_dtsg)
-            if "Lỗi" in tag_name:
-                flash("❌ Không thể lấy tên của UID {}: {}".format(tag_uid, tag_name), "error")
-                return redirect(url_for("nhaydz.index"))
+            if tag_name is None or "Lỗi" in tag_name:
+                flash("⚠️ Không thể lấy tên của UID {}, sẽ bỏ qua tag.".format(tag_uid), "error")
+                tag_uid = None  # bỏ tag
         except Exception as e:
-            flash("❌ Lỗi khi lấy tên tag: {}".format(str(e)), "error")
-            return redirect(url_for("nhaydz.index"))
+            flash("⚠️ Lỗi khi lấy tên tag, sẽ bỏ qua tag: {}".format(str(e)), "error")
+            tag_uid = None
 
     tid = str(TASK_ID_COUNTER)
     TASK_ID_COUNTER += 1
