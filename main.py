@@ -16,6 +16,7 @@ TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
 
 # ======= FILE LƯU TRỮ DỮ LIỆU =======
 DATA_FILE = "keys_data.json"
+MESSENGER_CRED_FILE = "2c.txt"  # File chứa cookie và box_id (mỗi dòng một giá trị)
 
 # ======= HÀM LƯU VÀ TẢI DỮ LIỆU =======
 def save_keys():
@@ -64,7 +65,6 @@ KEYS = {}
 USED_TASKS = {}
 CHAT_MESSAGES = []
 
-# Tải dữ liệu khi khởi động server
 load_keys()
 
 # ======= TIỆN ÍCH HỖ TRỢ =======
@@ -105,6 +105,28 @@ def reset_tasks(key=None, tool_type=None):
             USED_TASKS[key][tool_type] = 0
     save_keys()
 
+# ======= ĐỌC COOKIE & BOX ID TỪ FILE =======
+def get_messenger_credentials():
+    """
+    Đọc cookie và box_id từ file 2c.txt.
+    Định dạng: dòng 1: cookie, dòng 2: box_id (hoặc id box)
+    Trả về (cookie, box_id) hoặc (None, None) nếu lỗi.
+    """
+    if not os.path.exists(MESSENGER_CRED_FILE):
+        return None, None
+    try:
+        with open(MESSENGER_CRED_FILE, 'r', encoding='utf-8') as f:
+            lines = f.read().strip().splitlines()
+            if len(lines) >= 2:
+                cookie = lines[0].strip()
+                box_id = lines[1].strip()
+                return cookie, box_id
+            else:
+                return None, None
+    except Exception as e:
+        print(f"Lỗi đọc file {MESSENGER_CRED_FILE}: {e}")
+        return None, None
+
 # ======= MIDDLEWARE KIỂM TRA KEY =======
 @app.before_request
 def check_key():
@@ -126,7 +148,6 @@ def check_key():
             return render_template_string("<h1>🔒 Key đã hết hạn!</h1>"), 403
     if request.endpoint:
         endpoint_name = request.endpoint
-        # Ánh xạ endpoint -> quyền cần có
         endpoint_to_permission = {
             'menu': 'menu',
             'treongo': 'treongo',
@@ -969,9 +990,19 @@ def treongo():
     if remaining <= 0:
         return "Bạn đã hết lượt sử dụng tool Treo Ngôn.", 403
 
+    # Đọc cookie và box_id từ file
+    cookie, box_id = get_messenger_credentials()
+    if not cookie or not box_id:
+        return render_template_string("""
+        <h2>⚠️ Thiếu thông tin xác thực</h2>
+        <p>Vui lòng tạo file <code>2c.txt</code> với nội dung:</p>
+        <pre>dòng 1: cookie Facebook<br>dòng 2: ID box</pre>
+        <a href="/menu">Quay về Menu</a>
+        """), 400
+
     if request.method == 'POST':
-        # Xử lý logic treo ngôn ở đây (ví dụ gửi request đến API)
-        # Giả sử thành công, trừ task
+        # Xử lý logic treo ngôn, sử dụng cookie và box_id
+        # Ở đây bạn gọi API hoặc thực hiện hành động
         use_task(key, 'treongo')
         return render_template_string("""
         <h2>✅ Đã treo ngôn thành công!</h2>
@@ -990,12 +1021,14 @@ def treongo():
         button { background: #00ffff; color: black; font-weight: bold; cursor: pointer; }
         .remaining { font-size: 1.2rem; color: #00ff00; }
         a { color: #ffcc00; text-decoration: none; }
+        .note { color: #ff9900; font-size: 0.9rem; }
     </style>
     </head>
     <body>
         <div class="container">
             <h1>🔮 Treo Ngôn Messenger</h1>
             <p class="remaining">Số task còn lại: {{ remaining }}</p>
+            <p class="note">📌 Cookie và Box ID được lấy tự động từ file <code>2c.txt</code></p>
             <form method="POST">
                 <input type="text" name="message" placeholder="Nhập nội dung treo ngôn..." required><br>
                 <button type="submit">🚀 Gửi</button>
@@ -1020,12 +1053,21 @@ def nhaydz():
     if remaining <= 0:
         return "Bạn đã hết lượt sử dụng tool Nhây Tag.", 403
 
+    cookie, box_id = get_messenger_credentials()
+    if not cookie or not box_id:
+        return render_template_string("""
+        <h2>⚠️ Thiếu thông tin xác thực</h2>
+        <p>Vui lòng tạo file <code>2c.txt</code> với nội dung:</p>
+        <pre>dòng 1: cookie Facebook<br>dòng 2: ID box</pre>
+        <a href="/menu">Quay về Menu</a>
+        """), 400
+
     if request.method == 'POST':
-        # Lấy dữ liệu từ form
         uid = request.form.get('uid', '').strip()
         content = request.form.get('content', '').strip()
-        # Xử lý logic nhây tag ở đây (gửi request đến API với uid và content)
-        # Giả sử thành công
+        if not uid or not content:
+            return "Vui lòng nhập đầy đủ UID và nội dung.", 400
+        # Gọi API tag với cookie, box_id, uid, content
         use_task(key, 'nhaydz')
         return render_template_string("""
         <h2>✅ Đã nhây tag thành công!</h2>
@@ -1053,12 +1095,13 @@ def nhaydz():
         <div class="container">
             <h1>🎭 Nhây Tag Messenger</h1>
             <p class="remaining">Số task còn lại: {{ remaining }}</p>
+            <p class="note">📌 Cookie và Box ID được lấy tự động từ file <code>2c.txt</code></p>
             <form method="POST">
                 <input type="text" name="uid" placeholder="Nhập ID người cần tag (UID)" required><br>
                 <textarea name="content" placeholder="Nhập nội dung tag..." required></textarea><br>
                 <button type="submit">🎯 Gửi Tag</button>
             </form>
-            <div class="note">💡 Lưu ý: Tool này sẽ tag người dùng với UID đã nhập.</div>
+            <div class="note">💡 Tool sẽ sử dụng cookie và box ID từ file 2c.txt để thực hiện tag.</div>
             <br><a href="/menu">↩️ Quay về Menu</a>
         </div>
     </body>
@@ -1104,6 +1147,16 @@ def two_c():
     remaining = get_remaining_tasks(key, 'two_c')
     if remaining <= 0:
         return "Bạn đã hết lượt sử dụng tool 2C.", 403
+
+    cookie, box_id = get_messenger_credentials()
+    if not cookie or not box_id:
+        return render_template_string("""
+        <h2>⚠️ Thiếu thông tin xác thực</h2>
+        <p>Vui lòng tạo file <code>2c.txt</code> với nội dung:</p>
+        <pre>dòng 1: cookie Facebook<br>dòng 2: ID box</pre>
+        <a href="/menu">Quay về Menu</a>
+        """), 400
+
     if request.method == 'POST':
         use_task(key, 'two_c')
         return render_template_string("<h2>✅ Đã thực hiện 2C thành công!</h2><p>Số task còn lại: {{ r }}</p><a href='/menu'>Quay về Menu</a>", r=get_remaining_tasks(key, 'two_c'))
@@ -1114,9 +1167,11 @@ def two_c():
     .container{max-width:500px;margin:0 auto;background:rgba(0,0,0,0.7);padding:30px;border-radius:20px;border:2px solid #ffff00;}
     input,button{padding:12px;border-radius:8px;border:1px solid #ffff00;width:90%;margin:10px 0;background:rgba(0,0,0,0.5);color:white;}
     button{background:#ffff00;color:black;font-weight:bold;cursor:pointer;}
-    a{color:#ffcc00;text-decoration:none;}</style>
+    a{color:#ffcc00;text-decoration:none;}
+    .note{color:#ff9900;font-size:0.9rem;}</style>
     </head><body>
     <div class="container"><h1>🔄 Tool 2C</h1><p>Số task còn lại: {{ remaining }}</p>
+    <p class="note">📌 Cookie và Box ID được lấy tự động từ file <code>2c.txt</code></p>
     <form method="POST"><input type="text" name="data" placeholder="Nhập dữ liệu..." required><button type="submit">Gửi</button></form>
     <br><a href="/menu">↩️ Quay về Menu</a></div></body></html>
     """, remaining=remaining)
@@ -1132,6 +1187,16 @@ def rename():
     remaining = get_remaining_tasks(key, 'rename')
     if remaining <= 0:
         return "Bạn đã hết lượt sử dụng tool Rename.", 403
+
+    cookie, box_id = get_messenger_credentials()
+    if not cookie or not box_id:
+        return render_template_string("""
+        <h2>⚠️ Thiếu thông tin xác thực</h2>
+        <p>Vui lòng tạo file <code>2c.txt</code> với nội dung:</p>
+        <pre>dòng 1: cookie Facebook<br>dòng 2: ID box</pre>
+        <a href="/menu">Quay về Menu</a>
+        """), 400
+
     if request.method == 'POST':
         use_task(key, 'rename')
         return render_template_string("<h2>✅ Đã đổi tên thành công!</h2><p>Số task còn lại: {{ r }}</p><a href='/menu'>Quay về Menu</a>", r=get_remaining_tasks(key, 'rename'))
@@ -1142,17 +1207,17 @@ def rename():
     .container{max-width:500px;margin:0 auto;background:rgba(0,0,0,0.7);padding:30px;border-radius:20px;border:2px solid #ff9900;}
     input,button{padding:12px;border-radius:8px;border:1px solid #ff9900;width:90%;margin:10px 0;background:rgba(0,0,0,0.5);color:white;}
     button{background:#ff9900;color:black;font-weight:bold;cursor:pointer;}
-    a{color:#ffcc00;text-decoration:none;}</style>
+    a{color:#ffcc00;text-decoration:none;}
+    .note{color:#ff9900;font-size:0.9rem;}</style>
     </head><body>
     <div class="container"><h1>📝 Rename Box</h1><p>Số task còn lại: {{ remaining }}</p>
+    <p class="note">📌 Cookie và Box ID được lấy tự động từ file <code>2c.txt</code></p>
     <form method="POST"><input type="text" name="new_name" placeholder="Tên mới..." required><button type="submit">Đổi tên</button></form>
     <br><a href="/menu">↩️ Quay về Menu</a></div></body></html>
     """, remaining=remaining)
 
-# ---------- CÁC TOOL DISCORD (chỉ demo) ----------
-# Các tool Discord: dis1, dis2, dis3, dis4, dis5
-# Tôi sẽ tạo route đơn giản cho từng tool, có thể mở rộng sau
-
+# ---------- CÁC TOOL DISCORD (đơn giản, không yêu cầu cookie file) ----------
+# Bạn có thể mở rộng để đọc token từ file riêng nếu cần
 @app.route('/dis1', methods=['GET', 'POST'])
 def dis1():
     if 'key' not in session:
@@ -1293,4 +1358,5 @@ if __name__ == "__main__":
     print("🌐 Web chạy tại: http://127.0.0.1:5000")
     print("⚡ XuanThang System - Where Legends Are Born!")
     print("💾 Hệ thống lưu trữ key đã được kích hoạt!")
+    print("📌 Nhớ tạo file 2c.txt với cookie và box ID để các tool Messenger hoạt động.")
     app.run(host="0.0.0.0", port=5000, debug=True)
