@@ -18,12 +18,8 @@ USER_AGENTS = [
     "Mozilla/5.0 (Linux; Android 12; Redmi Note 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.129 Mobile Safari/537.36",
 ]
 
-# ====================== LẤY TÊN TỪ UID (CHỈ DÙNG mbasic) ======================
+# ====================== LẤY TÊN TỪ UID ======================
 def get_name_from_uid(uid, cookie):
-    """
-    Lấy tên người dùng từ UID bằng cách truy cập mbasic.facebook.com/profile.php?id=UID
-    Trả về tên (str) hoặc None nếu không lấy được.
-    """
     headers = {
         'Cookie': cookie,
         'User-Agent': random.choice(USER_AGENTS)
@@ -32,23 +28,18 @@ def get_name_from_uid(uid, cookie):
     try:
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code != 200:
-            print(f"[!] Không thể truy cập profile {uid} (status {resp.status_code})")
             return None
-        # Tìm tiêu đề
         match = re.search(r'<title>(.*?)</title>', resp.text)
         if match:
             title = match.group(1)
-            # Loại bỏ " | Facebook" nếu có
             title = re.sub(r' \| Facebook$', '', title).strip()
-            # Nếu title rỗng hoặc chứa từ khóa lỗi thì bỏ qua
             if title and "Facebook" not in title and "login" not in title.lower():
                 return title
         return None
-    except Exception as e:
-        print(f"[!] Lỗi khi lấy tên UID {uid}: {e}")
+    except:
         return None
 
-# ====================== LỚP MESSENGER ======================
+# ====================== LỚP MESSENGER (có fallback fb_dtsg) ======================
 class Messenger:
     def __init__(self, cookie):
         self.cookie = cookie
@@ -65,23 +56,39 @@ class Messenger:
         return match.group(1)
 
     def init_params(self):
+        # Thử lấy fb_dtsg từ mbasic
         headers = {'Cookie': self.cookie, 'User-Agent': self.user_agent}
         try:
             resp = requests.get('https://mbasic.facebook.com/me', headers=headers, timeout=10)
-            if resp.status_code != 200:
-                raise Exception("Không thể truy cập mbasic.facebook.com")
-            # Lấy tên
-            name_match = re.search(r'<title>(.*?)</title>', resp.text)
-            if name_match:
-                self.name = name_match.group(1).replace(" | Facebook", "").strip()
-            # Lấy fb_dtsg
-            dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', resp.text)
-            if dtsg_match:
-                self.fb_dtsg = dtsg_match.group(1)
-            else:
-                raise Exception("Không tìm thấy fb_dtsg")
-        except Exception as e:
-            raise Exception(f"Lỗi khởi tạo Messenger: {str(e)}")
+            if resp.status_code == 200:
+                name_match = re.search(r'<title>(.*?)</title>', resp.text)
+                if name_match:
+                    self.name = name_match.group(1).replace(" | Facebook", "").strip()
+                dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', resp.text)
+                if dtsg_match:
+                    self.fb_dtsg = dtsg_match.group(1)
+                    return  # thành công
+        except:
+            pass
+
+        # Fallback: lấy từ www.facebook.com
+        try:
+            resp = requests.get('https://www.facebook.com/', headers=headers, timeout=10)
+            if resp.status_code == 200:
+                dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', resp.text)
+                if dtsg_match:
+                    self.fb_dtsg = dtsg_match.group(1)
+                    # Lấy tên từ trang profile
+                    profile_resp = requests.get('https://www.facebook.com/me', headers=headers, timeout=10)
+                    if profile_resp.status_code == 200:
+                        name_match = re.search(r'<title>(.*?)</title>', profile_resp.text)
+                        if name_match:
+                            self.name = name_match.group(1).replace(" | Facebook", "").strip()
+                    return
+        except:
+            pass
+
+        raise Exception("Không thể lấy fb_dtsg, cookie có thể đã hết hạn hoặc không hợp lệ.")
 
     def refresh_fb_dtsg(self):
         try:
@@ -111,9 +118,7 @@ class Messenger:
                 'fb_dtsg': self.fb_dtsg
             }
 
-            # Xử lý tag nếu có
             if id_tag and name_tag:
-                # Tìm vị trí của tên trong message
                 if name_tag.startswith('@'):
                     name_clean = name_tag[1:]
                 else:
@@ -200,7 +205,7 @@ class Task:
     def user_id(self):
         return self.messenger.user_id
 
-# ====================== HTML (GIỮ NGUYÊN) ======================
+# ====================== HTML (giữ nguyên) ======================
 HTML = r"""
 <!DOCTYPE html>
 <html lang="vi">
