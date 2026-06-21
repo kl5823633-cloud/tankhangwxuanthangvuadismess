@@ -9,68 +9,44 @@ TASK_ID_COUNTER = 1
 NHAY_FILE = "nhay.txt"
 
 # ------------------- USER AGENTS -------------------
-UA_KIWI = [
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (Linux; Android 11; RMX2185) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.140 Mobile Safari/537.36",
     "Mozilla/5.0 (Linux; Android 12; Redmi Note 11) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.129 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 13; Pixel 6a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.68 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 10; V2031) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.5938.60 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 14; CPH2481) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.86 Mobile Safari/537.36"
 ]
-UA_VIA = [
-    "Mozilla/5.0 (Linux; Android 10; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/108.0.0.0 Mobile Safari/537.36 Via/4.8.2",
-    "Mozilla/5.0 (Linux; Android 11; V2109) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/112.0.5615.138 Mobile Safari/537.36 Via/4.9.0",
-    "Mozilla/5.0 (Linux; Android 13; TECNO POVA 5) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/114.0.5735.134 Mobile Safari/537.36 Via/5.0.1",
-    "Mozilla/5.0 (Linux; Android 12; Infinix X6710) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.5790.138 Mobile Safari/537.36 Via/5.2.0",
-    "Mozilla/5.0 (Linux; Android 14; SM-A546E) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/122.0.6261.112 Mobile Safari/537.36 Via/5.3.1"
-]
-USER_AGENTS = UA_KIWI + UA_VIA
 
-# ====================== HÀM LẤY TÊN (có fallback) ======================
-def get_name_from_uid(uid, cookie, fb_dtsg, req="1b", rev="1015919737"):
-    """Lấy tên người dùng từ UID, fallback sang mbasic nếu API lỗi"""
-    # Thử qua API chat/user_info trước
+# ====================== LẤY TÊN TỪ UID (CHỈ DÙNG mbasic) ======================
+def get_name_from_uid(uid, cookie):
+    """
+    Lấy tên người dùng từ UID bằng cách truy cập mbasic.facebook.com/profile.php?id=UID
+    Trả về tên (str) hoặc None nếu không lấy được.
+    """
+    headers = {
+        'Cookie': cookie,
+        'User-Agent': random.choice(USER_AGENTS)
+    }
+    url = f"https://mbasic.facebook.com/profile.php?id={uid}"
     try:
-        form = {
-            f"ids[0]": uid,
-            "fb_dtsg": fb_dtsg,
-            "__a": "1",
-            "__req": req,
-            "__rev": rev
-        }
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Cookie': cookie,
-            'Origin': 'https://www.facebook.com',
-            'Referer': 'https://www.facebook.com/',
-            'User-Agent': random.choice(USER_AGENTS)
-        }
-        response = requests.post("https://www.facebook.com/chat/user_info/", headers=headers, data=form, timeout=10)
-        text_response = response.text
-        if text_response.startswith("for (;;);"):
-            text_response = text_response[9:]
-        data = json.loads(text_response)
-        if "payload" in data and "profiles" in data["payload"] and uid in data["payload"]["profiles"]:
-            profile = data["payload"]["profiles"][uid]
-            name = profile.get("name")
-            if name:
-                return name
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"[!] Không thể truy cập profile {uid} (status {resp.status_code})")
+            return None
+        # Tìm tiêu đề
+        match = re.search(r'<title>(.*?)</title>', resp.text)
+        if match:
+            title = match.group(1)
+            # Loại bỏ " | Facebook" nếu có
+            title = re.sub(r' \| Facebook$', '', title).strip()
+            # Nếu title rỗng hoặc chứa từ khóa lỗi thì bỏ qua
+            if title and "Facebook" not in title and "login" not in title.lower():
+                return title
+        return None
     except Exception as e:
-        print(f"[!] Lỗi API chat/user_info: {e}")
-
-    # Fallback: lấy từ mbasic
-    try:
-        headers = {'Cookie': cookie, 'User-Agent': random.choice(USER_AGENTS)}
-        res = requests.get(f'https://mbasic.facebook.com/profile.php?id={uid}', headers=headers, timeout=10)
-        name_match = re.search(r'<title>(.*?)</title>', res.text)
-        if name_match:
-            name = name_match.group(1).replace(" | Facebook", "").strip()
-            if name:
-                return name
-    except Exception as e:
-        print(f"[!] Lỗi fallback mbasic: {e}")
-
-    # Nếu vẫn không có, trả về None để bỏ qua tag
-    return None
+        print(f"[!] Lỗi khi lấy tên UID {uid}: {e}")
+        return None
 
 # ====================== LỚP MESSENGER ======================
 class Messenger:
@@ -91,32 +67,32 @@ class Messenger:
     def init_params(self):
         headers = {'Cookie': self.cookie, 'User-Agent': self.user_agent}
         try:
-            response = requests.get('https://mbasic.facebook.com/me', headers=headers, timeout=10)
-            name_match = re.search(r'<title>(.*?)</title>', response.text)
+            resp = requests.get('https://mbasic.facebook.com/me', headers=headers, timeout=10)
+            if resp.status_code != 200:
+                raise Exception("Không thể truy cập mbasic.facebook.com")
+            # Lấy tên
+            name_match = re.search(r'<title>(.*?)</title>', resp.text)
             if name_match:
-                self.name = name_match.group(1).replace(" | Facebook", "")
-            fb_dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', response.text)
-            if fb_dtsg_match:
-                self.fb_dtsg = fb_dtsg_match.group(1)
+                self.name = name_match.group(1).replace(" | Facebook", "").strip()
+            # Lấy fb_dtsg
+            dtsg_match = re.search(r'name="fb_dtsg" value="(.*?)"', resp.text)
+            if dtsg_match:
+                self.fb_dtsg = dtsg_match.group(1)
             else:
-                raise Exception("Không thể lấy fb_dtsg")
+                raise Exception("Không tìm thấy fb_dtsg")
         except Exception as e:
-            raise Exception(f"Lỗi khi khởi tạo tham số: {str(e)}")
+            raise Exception(f"Lỗi khởi tạo Messenger: {str(e)}")
 
     def refresh_fb_dtsg(self):
         try:
             self.init_params()
-            print(f"[!] Làm mới fb_dtsg cho {self.name} ({self.user_id}) thành công.")
+            print(f"[!] Đã làm mới fb_dtsg cho {self.name} ({self.user_id})")
         except Exception as e:
-            print(f"[X] Lỗi làm mới fb_dtsg: {e}")
+            print(f"[!] Làm mới fb_dtsg thất bại: {e}")
 
     def gui_tn(self, recipient_id, message, id_tag=None, name_tag=None, max_retries=3):
-        """Gửi tin nhắn, hỗ trợ tag qua profile_xmd"""
         for attempt in range(max_retries):
             timestamp = int(time.time() * 1000)
-            offline_threading_id = str(timestamp)
-            message_id = str(timestamp)
-
             data = {
                 'thread_fbid': recipient_id,
                 'action_type': 'ma-type:user-generated-message',
@@ -125,8 +101,8 @@ class Messenger:
                 'author': f'fbid:{self.user_id}',
                 'timestamp': timestamp,
                 'source': 'source:chat:web',
-                'offline_threading_id': offline_threading_id,
-                'message_id': message_id,
+                'offline_threading_id': str(timestamp),
+                'message_id': str(timestamp),
                 'ephemeral_ttl_mode': '',
                 '__user': self.user_id,
                 '__a': '1',
@@ -135,20 +111,20 @@ class Messenger:
                 'fb_dtsg': self.fb_dtsg
             }
 
-            # Nếu có tag hợp lệ, thêm profile_xmd
+            # Xử lý tag nếu có
             if id_tag and name_tag:
-                # Tìm vị trí của name_tag trong message
+                # Tìm vị trí của tên trong message
                 if name_tag.startswith('@'):
-                    name_tag_clean = name_tag[1:]
+                    name_clean = name_tag[1:]
                 else:
-                    name_tag_clean = name_tag
+                    name_clean = name_tag
                 lower_msg = message.lower()
-                lower_name = name_tag_clean.lower()
-                start_pos = lower_msg.find(lower_name)
-                if start_pos != -1:
+                lower_name = name_clean.lower()
+                pos = lower_msg.find(lower_name)
+                if pos != -1:
                     data.update({
-                        'profile_xmd[0][offset]': str(start_pos),
-                        'profile_xmd[0][length]': str(len(name_tag_clean)),
+                        'profile_xmd[0][offset]': str(pos),
+                        'profile_xmd[0][length]': str(len(name_clean)),
                         'profile_xmd[0][id]': str(id_tag),
                         'profile_xmd[0][type]': 'p'
                     })
@@ -156,55 +132,34 @@ class Messenger:
             headers = {
                 'Cookie': self.cookie,
                 'User-Agent': self.user_agent,
-                'Accept': '*/*',
-                'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Origin': 'https://www.facebook.com',
                 'Referer': f'https://www.facebook.com/messages/t/{recipient_id}',
-                'Host': 'www.facebook.com',
-                'Sec-Fetch-Site': 'same-origin',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Dest': 'empty'
+                'Host': 'www.facebook.com'
             }
 
             try:
-                response = requests.post(
-                    'https://www.facebook.com/messaging/send/',
-                    data=data,
-                    headers=headers
-                )
-                if response.status_code != 200:
+                resp = requests.post('https://www.facebook.com/messaging/send/', data=data, headers=headers, timeout=15)
+                if resp.status_code != 200:
                     continue
 
-                if 'for (;;);' in response.text:
-                    clean_text = response.text.replace('for (;;);', '')
+                if 'for (;;);' in resp.text:
+                    clean = resp.text.replace('for (;;);', '')
                     try:
-                        result = json.loads(clean_text)
-                        err_val = result.get('error', 0)
-                        if err_val and str(err_val) != "0":
+                        result = json.loads(clean)
+                        if result.get('error') and str(result.get('error')) != "0":
                             self.refresh_fb_dtsg()
                             data['fb_dtsg'] = self.fb_dtsg
                             continue
-                        return {
-                            'success': True,
-                            'message_id': message_id,
-                            'timestamp': timestamp
-                        }
-                    except json.JSONDecodeError:
+                        return {'success': True}
+                    except:
                         pass
-
-                return {
-                    'success': True,
-                    'message_id': message_id,
-                    'timestamp': timestamp
-                }
+                return {'success': True}
             except Exception as e:
-                print(f"[X] Lỗi gửi tin nhắn (lần {attempt+1}): {e}")
+                print(f"[!] Gửi lỗi (lần {attempt+1}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
-        return {'success': False, 'error_description': 'Gửi tin nhắn thất bại sau nhiều lần thử'}
+        return {'success': False, 'error_description': 'Gửi thất bại sau nhiều lần thử'}
 
 # ====================== TASK ======================
 class Task:
@@ -215,7 +170,7 @@ class Task:
         self.messages = messages
         self.delay = delay
         self.tag_uid = tag_uid
-        self.tag_name = tag_name  # tên thật của người được tag (hoặc None)
+        self.tag_name = tag_name
         self.running = True
         self.message_count = 0
         threading.Thread(target=self.run, daemon=True).start()
@@ -224,7 +179,6 @@ class Task:
         while self.running:
             msg = random.choice(self.messages)
             if self.tag_uid and self.tag_name:
-                # Thêm tên vào cuối tin nhắn (có dấu @)
                 full_msg = msg + f" @{self.tag_name}"
                 result = self.messenger.gui_tn(
                     self.recipient_id,
@@ -237,16 +191,16 @@ class Task:
 
             if result.get('success'):
                 self.message_count += 1
-                print(f"✅ Đã gửi tin đến {self.recipient_id} (task {self.tid})")
+                print(f"[+] Gửi thành công tới {self.recipient_id}")
             else:
-                print(f"❌ Lỗi gửi tin: {result.get('error_description')}")
+                print(f"[-] Lỗi: {result.get('error_description')}")
             time.sleep(self.delay)
 
     @property
     def user_id(self):
         return self.messenger.user_id
 
-# ====================== HTML (giữ nguyên) ======================
+# ====================== HTML (GIỮ NGUYÊN) ======================
 HTML = r"""
 <!DOCTYPE html>
 <html lang="vi">
@@ -555,47 +509,46 @@ def add_task():
         tag_uid = None
 
     if not os.path.exists(NHAY_FILE):
-        flash("❌ Không tìm thấy file '{}'!".format(NHAY_FILE), "error")
+        flash(f"❌ Không tìm thấy file '{NHAY_FILE}'!", "error")
         return redirect(url_for("nhaydz.index"))
 
     with open(NHAY_FILE, 'r', encoding='utf-8') as f:
         messages = [line.strip() for line in f if line.strip()]
     if not messages:
-        flash("❌ File '{}' trống!".format(NHAY_FILE), "error")
+        flash(f"❌ File '{NHAY_FILE}' trống!", "error")
         return redirect(url_for("nhaydz.index"))
 
-    # Khởi tạo Messenger
     try:
         messenger = Messenger(cookie)
     except Exception as e:
-        flash("❌ Cookie không hợp lệ hoặc lỗi đăng nhập: {}".format(str(e)), "error")
+        flash(f"❌ Lỗi đăng nhập: {str(e)}", "error")
         return redirect(url_for("nhaydz.index"))
 
-    # Nếu có tag, lấy tên người đó (fallback nếu lỗi)
     tag_name = None
     if tag_uid:
         try:
-            tag_name = get_name_from_uid(tag_uid, cookie, messenger.fb_dtsg)
-            if tag_name is None or "Lỗi" in tag_name:
-                flash("⚠️ Không thể lấy tên của UID {}, sẽ bỏ qua tag.".format(tag_uid), "error")
-                tag_uid = None  # bỏ tag
+            tag_name = get_name_from_uid(tag_uid, cookie)
+            if tag_name:
+                flash(f"✅ Đã tìm thấy tên: {tag_name}", "success")
+            else:
+                flash(f"⚠️ Không thể lấy tên của UID {tag_uid}, bỏ qua tag.", "error")
+                tag_uid = None
         except Exception as e:
-            flash("⚠️ Lỗi khi lấy tên tag, sẽ bỏ qua tag: {}".format(str(e)), "error")
+            flash(f"⚠️ Lỗi khi lấy tên tag: {e}, bỏ qua tag.", "error")
             tag_uid = None
 
     tid = str(TASK_ID_COUNTER)
     TASK_ID_COUNTER += 1
     task = Task(tid, messenger, recipient_id, messages, delay, tag_uid, tag_name)
     TASKS[tid] = task
-    flash("✅ Đã bắt đầu nhây UID {} (delay {}s, {} câu) + tag {}".format(
-        recipient_id, delay, len(messages), tag_uid if tag_uid else 'không tag'), "success")
+    flash(f"✅ Đã bắt đầu nhây UID {recipient_id} (delay {delay}s, {len(messages)} câu) + tag {tag_uid if tag_uid else 'không tag'}", "success")
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/stop/<tid>')
 def stop_task(tid):
     if tid in TASKS:
         TASKS[tid].running = False
-        flash("🛑 Dừng task #{}".format(tid), "error")
+        flash(f"🛑 Dừng task #{tid}", "error")
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/start/<tid>')
@@ -605,7 +558,7 @@ def start_task(tid):
         if not t.running:
             t.running = True
             threading.Thread(target=t.run, daemon=True).start()
-            flash("▶️ Tiếp tục task #{}".format(tid), "success")
+            flash(f"▶️ Tiếp tục task #{tid}", "success")
     return redirect(url_for("nhaydz.index"))
 
 @nhaydz_bp.route('/delete/<tid>')
@@ -613,5 +566,5 @@ def delete_task(tid):
     if tid in TASKS:
         TASKS[tid].running = False
         del TASKS[tid]
-        flash("🗑️ Đã xóa task #{}".format(tid), "error")
+        flash(f"🗑️ Đã xóa task #{tid}", "error")
     return redirect(url_for("nhaydz.index"))
