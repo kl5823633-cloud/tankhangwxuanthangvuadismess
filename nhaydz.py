@@ -243,7 +243,7 @@ HTML = r"""
                 <div class="form-group">
                     <label>🏷️ UID người cần tag (để trống nếu không tag):</label>
                     <input type="text" name="tag_uid" placeholder="Nhập ID người cần tag (ví dụ: 1000xxxxxx)">
-                    <div class="tag-hint">Nếu có tag, mỗi tin nhắn sẽ có @[tag_uid:0] ở cuối tin (Facebook sẽ hiển thị tên).</div>
+                    <div class="tag-hint">Nếu có tag, mỗi tin nhắn sẽ có @[UID:0:0] ở cuối tin (Facebook sẽ tự động hiển thị tên).</div>
                 </div>
 
                 <div class="form-group">
@@ -293,7 +293,6 @@ HTML = r"""
             {% endfor %}
         </table>
 
-        <!-- 🟢 Nút quay về menu chính -->
         <div style="text-align:center;">
             <a href="/menu" class="back-btn">⬅️ Quay về Menu Chính</a>
         </div>
@@ -375,7 +374,7 @@ class Task:
         self.recipient_id = recipient_id
         self.messages = messages
         self.delay = delay
-        self.tag_uid = tag_uid  # UID cần tag (có thể None)
+        self.tag_uid = tag_uid
         self.running = True
         self.message_count = 0
         threading.Thread(target=self.run, daemon=True).start()
@@ -383,9 +382,9 @@ class Task:
     def run(self):
         while self.running:
             msg = random.choice(self.messages)
-            # Nếu có tag, thêm @[tag_uid:0] vào cuối tin nhắn (Facebook sẽ hiển thị tên)
+            # Thêm tag với định dạng chuẩn: @[UID:0:0] để Facebook hiển thị tên
             if self.tag_uid:
-                msg = msg + f" @[{self.tag_uid}:0]"
+                msg = msg + f" @[{self.tag_uid}:0:0]"
             if self.messenger.send_message(self.recipient_id, msg):
                 self.message_count += 1
             time.sleep(self.delay)
